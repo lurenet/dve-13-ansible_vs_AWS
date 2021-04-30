@@ -1,0 +1,17 @@
+- name: install maven
+  apt: pkg=maven state=present update_cache=true
+
+- name: clone boxfuse repo
+  git:
+    repo: https://github.com/boxfuse/boxfuse-sample-java-war-hello.git
+    dest: "{{ project_path }}"
+    clone: yes
+
+- name: maven clean package
+  command: mvn -f "{{ project_path }}/pom.xml" clean package
+
+- name: copy war file
+  fetch:
+    src: "{{ project_path }}/target/{{ project_file }}"
+    dest: prod/files/
+    flat: true

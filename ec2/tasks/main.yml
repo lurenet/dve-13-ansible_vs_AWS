@@ -1,0 +1,92 @@
+- name: Create security group
+  ec2_group:
+    name: "{{ project_name }}_security_group"
+    description: "{{ project_name }} security group"
+    region: "{{ region }}"
+    rules:
+      - proto: all
+        cidr_ip: 0.0.0.0/0
+    rules_egress:
+      - proto: all
+        cidr_ip: 0.0.0.0/0
+  register: allow_all_fw
+
+- name: Create an EC2 key
+  ec2_key:
+    name: "{{ project_name }}-key"
+    region: "{{ region }}"
+  register: ec2_key
+
+- name: Save private key
+  copy:
+    content: "{{ ec2_key.key.private_key }}"
+    dest: "aws-private.pem"
+    mode: 0600
+  when: ec2_key.changed
+
+- name: Create build instance
+  ec2:
+    key_name: "{{ project_name }}-key"
+    region: "{{ region }}"
+    group_id: "{{ allow_all_fw.group_id }}"
+    instance_type: "{{ instance_type }}"
+    image: "{{ ami }}"
+    wait: yes
+    instance_tags:
+        Name: "{{ project_name }}-build"
+    count_tag: env
+    exact_count: 1
+    vpc_subnet_id: "{{ subnet_id }}"
+    assign_public_ip: yes
+  register: ec2_build
+
+- name: Create prod instance
+  ec2:
+    key_name: "{{ project_name }}-key"
+    region: "{{ region }}"
+    group_id: "{{ allow_all_fw.group_id }}"
+    instance_type: "{{ instance_type }}"
+    image: "{{ ami }}"
+    wait: yes
+    instance_tags:
+        Name: "{{ project_name }}-prod"
+    count_tag: env
+    exact_count: 1
+    vpc_subnet_id: "{{ subnet_id }}"
+    assign_public_ip: yes
+  register: ec2_prod
+
+- name: Add the newly created EC2 instance(s) to host group
+  lineinfile: dest={{ hostpath }}
+              regexp={{ item.public_ip }}
+              insertafter="\[build\]"
+              line="{{ item.public_ip }} {{ hoststring }}"
+              state=present
+  with_items: "{{ ec2_build.instances }}"
+
+- name: Add the newly created EC2 instance(s) to host group
+  lineinfile: dest={{ hostpath }}
+              regexp={{ item.public_ip }}
+              insertafter="\[prod\]"
+              line="{{ item.public_ip }} {{ hoststring }}"
+              state=present
+  with_items: "{{ ec2_prod.instances }}"
+
+- wait_for: path={{ hostpath }} search_regex={{ hoststring }}
+
+- name: Wait for SSH to come up
+  local_action: wait_for
+                host={{ item.public_ip }}
+                port=22
+                state=started
+  with_items:
+    - "{{ ec2_build.instances }}"
+    - "{{ ec2_prod.instances }}"
+
+- name: Add IP to ec2_hosts group
+  add_host: hostname={{ item.public_ip }} groups=ec2_hosts
+  with_items:
+    - "{{ ec2_build.instances }}"
+    - "{{ ec2_prod.instances }}"
+
+- meta: refresh_inventory

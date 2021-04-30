@@ -1,0 +1,23 @@
+- name: create instances
+  hosts: 127.0.0.1
+  connection: local
+  gather_facts: False
+  remote_user: ubuntu
+  roles:
+    - ec2
+
+- name: prepearing build environment
+  hosts: build
+  become: yes
+  gather_facts: False
+  roles:
+    - build
+
+- name: prepearing prod environment
+  hosts: prod
+  become: yes
+  become_method: sudo
+  remote_user: ubuntu
+  gather_facts: False
+  roles:
+    - prod
